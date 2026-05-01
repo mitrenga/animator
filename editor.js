@@ -47,6 +47,15 @@ const loopSlider    = document.getElementById('loopSlider');
 const loopMsEl      = document.getElementById('loopMs');
 const canvasWrap    = document.getElementById('canvas-wrap');
 const readonlyBadge = document.getElementById('readonly-badge');
+const spritesMapSelect = document.getElementById('spritesMapSelect');
+
+// ─── Remote data ──────────────────────────────────────────────────────────────
+
+const REMOTE_BASE = 'https://willy2.shipard.pro:34444/endlessuniverse/';
+const SPRITES_MAP_URL = REMOTE_BASE + 'data/spritesMap.json';
+
+// Flat list of { category, file, sprite } built from spritesMap.json
+let spritesMapEntries = [];
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
 
@@ -808,7 +817,7 @@ function validate(data) {
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
-function loadData(data) {
+function loadData(data, preferredEntityKey = null) {
   const errors = validate(data);
   if (errors.length) {
     const msg = `Warnings (${errors.length}):\n` + errors.slice(0, 15).join('\n') +
@@ -819,7 +828,9 @@ function loadData(data) {
   stopPreview();
 
   state.data       = data;
-  state.entityKey  = Object.keys(data)[0];
+  state.entityKey  = (preferredEntityKey && data[preferredEntityKey])
+    ? preferredEntityKey
+    : Object.keys(data)[0];
   state.currentAnim  = Object.keys(anims())[0];
   state.currentFrame = 0;
   state.undoStack  = [];
@@ -845,11 +856,66 @@ function loadData(data) {
   startPreview();
 }
 
-// ─── Boot: auto-load from remote ─────────────────────────────────────────────
+// ─── Boot: load spritesMap.json, populate selector, load first ───────────────
 
-fetch('https://willy2.shipard.pro:34444/endlessuniverse/data/moon01/global.json?t=' + Date.now(), { cache: 'no-store' })
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(loadData)
-  .catch(() => {
-    // No auto-load — user must import
+function fileBaseName(path) {
+  const name = path.split('/').pop() || path;
+  return name.replace(/\.[^.]+$/, '');
+}
+
+function buildSpritesMapSelect() {
+  spritesMapSelect.innerHTML = '';
+  spritesMapEntries.forEach((e, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${e.category} / ${fileBaseName(e.file)} / ${e.sprite}`;
+    spritesMapSelect.appendChild(opt);
+  });
+}
+
+function loadSpriteEntry(idx) {
+  const e = spritesMapEntries[idx];
+  if (!e) return;
+  spritesMapSelect.value = String(idx);
+  fetch(REMOTE_BASE + e.file + '?t=' + Date.now(), { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => loadData(data, e.sprite))
+    .catch(err => console.error('Failed to load sprite file', e.file, err));
+}
+
+spritesMapSelect.addEventListener('change', () => {
+  loadSpriteEntry(parseInt(spritesMapSelect.value, 10));
+});
+
+function setSpritesMapPlaceholder(text) {
+  spritesMapSelect.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = text;
+  opt.disabled = true;
+  opt.selected = true;
+  spritesMapSelect.appendChild(opt);
+}
+
+fetch(SPRITES_MAP_URL + '?t=' + Date.now(), { cache: 'no-store' })
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(map => {
+    spritesMapEntries = [];
+    Object.keys(map).forEach(category => {
+      (map[category] || []).forEach(entry => {
+        if (entry && entry.file && entry.sprite) {
+          spritesMapEntries.push({ category, file: entry.file, sprite: entry.sprite });
+        }
+      });
+    });
+    if (!spritesMapEntries.length) {
+      setSpritesMapPlaceholder('(spritesMap.json is empty)');
+      return;
+    }
+    buildSpritesMapSelect();
+    loadSpriteEntry(0);
+  })
+  .catch(err => {
+    console.error('Failed to load spritesMap.json from', SPRITES_MAP_URL, err);
+    setSpritesMapPlaceholder('(failed to load spritesMap.json — see console)');
   });

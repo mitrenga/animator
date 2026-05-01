@@ -10,6 +10,7 @@
     <div class="header-left">
       <button id="btnImport" title="Import JSON">Import JSON</button>
       <button id="btnExport" title="Export JSON">Export JSON</button>
+      <select id="spritesMapSelect" title="Sprite to edit"></select>
     </div>
     <div class="header-title">ANIMATOR — sprite editor</div>
   </header>
