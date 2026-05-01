@@ -59,11 +59,11 @@ let spritesMapEntries = [];
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
 
-function entity()     { return state.data[state.entityKey]; }
-function colors()     { return entity().colors; }
+function entity()     { return state.data.sprites[state.entityKey]; }
+function colors()     { return state.data.colors; }
 function W()          { return entity().width; }
 function H()          { return entity().height; }
-function anims()      { return entity().animation; }
+function anims()      { return entity().clips; }
 function timelines()  { return entity().timelines; }
 
 function currentAnim() { return anims()[state.currentAnim]; }
@@ -482,7 +482,7 @@ function previewTick(ts) {
   if (state.previewStep >= timeline.length) state.previewStep = 0;
 
   const step    = timeline[state.previewStep];
-  const sprites = resolvedSprites(step.animName);
+  const sprites = resolvedSprites(step.clip);
 
   if (sprites.length) {
     // Which frame to show?
@@ -529,7 +529,7 @@ function getTimeline() {
   document.querySelectorAll('#timelineBody tr').forEach(tr => {
     const sel = tr.querySelector('select');
     const inp = tr.querySelector('input[type="number"]');
-    if (sel && inp) rows.push({ animName: sel.value, duration: parseInt(inp.value) || 70 });
+    if (sel && inp) rows.push({ clip: sel.value, duration: parseInt(inp.value) || 70 });
   });
   return rows;
 }
@@ -548,7 +548,7 @@ function buildTimelineSelect() {
 
 function loadCurrentTimeline() {
   const available = new Set(Object.keys(anims()));
-  const steps = (timelines()[state.currentTimeline] || []).filter(s => available.has(s.animName));
+  const steps = (timelines()[state.currentTimeline] || []).filter(s => available.has(s.clip));
   buildTimeline(steps);
 }
 
@@ -577,7 +577,7 @@ function addTimelineRow(step, i) {
     opt.value = name; opt.textContent = name;
     sel.appendChild(opt);
   }
-  sel.value = step.animName;
+  sel.value = step.clip;
   tdA.appendChild(sel);
 
   const tdD = document.createElement('td');
@@ -618,7 +618,7 @@ function addTimelineRow(step, i) {
 
 document.getElementById('btnAddStep').addEventListener('click', () => {
   const firstAnim = Object.keys(anims())[0];
-  addTimelineRow({ animName: firstAnim, duration: 70 });
+  addTimelineRow({ clip: firstAnim, duration: 70 });
   rebuildIndices();
   saveCurrentTimeline();
 });
@@ -663,15 +663,15 @@ function defaultTimeline() {
   if (!Object.keys(tl).length) {
     const available = new Set(Object.keys(anims()));
     const seed = [
-      { animName: 'walkRight',  duration: 2000 },
-      { animName: 'rotateLeft', duration: 70   },
-      { animName: 'frontView',  duration: 70   },
-      { animName: 'rotateRight',duration: 70   },
-      { animName: 'walkLeft',   duration: 2000 },
-      { animName: 'rotateRight',duration: 70   },
-      { animName: 'frontView',  duration: 70   },
-      { animName: 'rotateLeft', duration: 70   },
-    ].filter(s => available.has(s.animName));
+      { clip: 'right',     duration: 2000 },
+      { clip: 'turnLeft',  duration: 70   },
+      { clip: 'frontView', duration: 70   },
+      { clip: 'turnRight', duration: 70   },
+      { clip: 'left',      duration: 2000 },
+      { clip: 'turnRight', duration: 70   },
+      { clip: 'frontView', duration: 70   },
+      { clip: 'turnLeft',  duration: 70   },
+    ].filter(s => available.has(s.clip));
     tl['default'] = seed;
   }
   state.currentTimeline = Object.keys(tl)[0];
@@ -788,24 +788,25 @@ document.getElementById('btnExportCopy').addEventListener('click', () => {
 
 function validate(data) {
   const errors = [];
-  for (const [eKey, ent] of Object.entries(data)) {
-    if (!ent.colors || !ent.animation) continue;
-    const w    = ent.width;
-    const h    = ent.height;
-    const keys = new Set(Object.keys(ent.colors));
-    for (const [animName, anim] of Object.entries(ent.animation)) {
-      if (anim.type !== 'sprite') continue;
-      anim.sprites.forEach((sprite, si) => {
-        if (sprite.length !== h) {
-          errors.push(`${eKey}/${animName}[${si}]: got ${sprite.length} rows, expected ${h}`);
+  if (!data || !data.colors || !data.sprites) return errors;
+  const keys = new Set(Object.keys(data.colors));
+  for (const [sKey, sprite] of Object.entries(data.sprites)) {
+    if (!sprite || !sprite.clips) continue;
+    const w = sprite.width;
+    const h = sprite.height;
+    for (const [clipName, clip] of Object.entries(sprite.clips)) {
+      if (clip.type !== 'sprite') continue;
+      clip.sprites.forEach((spr, si) => {
+        if (spr.length !== h) {
+          errors.push(`${sKey}/${clipName}[${si}]: got ${spr.length} rows, expected ${h}`);
         }
-        sprite.forEach((row, ri) => {
+        spr.forEach((row, ri) => {
           if (row.length !== w) {
-            errors.push(`${eKey}/${animName}[${si}]/r${ri}: length ${row.length}, expected ${w}`);
+            errors.push(`${sKey}/${clipName}[${si}]/r${ri}: length ${row.length}, expected ${w}`);
           }
           for (let ci = 0; ci < row.length; ci++) {
             if (!keys.has(row[ci])) {
-              errors.push(`${eKey}/${animName}[${si}]/r${ri}/c${ci}: unknown char '${row[ci]}'`);
+              errors.push(`${sKey}/${clipName}[${si}]/r${ri}/c${ci}: unknown char '${row[ci]}'`);
             }
           }
         });
@@ -817,7 +818,42 @@ function validate(data) {
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 
+function findEmptyChar(data) {
+  if (data && data.colors) {
+    for (const [ch, v] of Object.entries(data.colors)) {
+      if (v === false) return ch;
+    }
+  }
+  return ' ';
+}
+
+function normalizeSpriteDimensions(data) {
+  if (!data || !data.sprites) return;
+  const empty = findEmptyChar(data);
+  for (const sprite of Object.values(data.sprites)) {
+    if (!sprite || !sprite.clips) continue;
+    const w = sprite.width;
+    const h = sprite.height;
+    if (typeof w !== 'number' || typeof h !== 'number') continue;
+    const blankRow = empty.repeat(w);
+    for (const clip of Object.values(sprite.clips)) {
+      if (clip.type !== 'sprite' || !Array.isArray(clip.sprites)) continue;
+      clip.sprites = clip.sprites.map(frame => {
+        const rows = Array.isArray(frame) ? frame.slice(0, h) : [];
+        while (rows.length < h) rows.push(blankRow);
+        return rows.map(row => {
+          const s = (typeof row === 'string') ? row : String(row || '');
+          if (s.length > w) return s.slice(0, w);
+          if (s.length < w) return s + empty.repeat(w - s.length);
+          return s;
+        });
+      });
+    }
+  }
+}
+
 function loadData(data, preferredEntityKey = null) {
+  normalizeSpriteDimensions(data);
   const errors = validate(data);
   if (errors.length) {
     const msg = `Warnings (${errors.length}):\n` + errors.slice(0, 15).join('\n') +
@@ -828,9 +864,10 @@ function loadData(data, preferredEntityKey = null) {
   stopPreview();
 
   state.data       = data;
-  state.entityKey  = (preferredEntityKey && data[preferredEntityKey])
+  const spriteKeys = Object.keys(data.sprites || {});
+  state.entityKey  = (preferredEntityKey && data.sprites && data.sprites[preferredEntityKey])
     ? preferredEntityKey
-    : Object.keys(data)[0];
+    : spriteKeys[0];
   state.currentAnim  = Object.keys(anims())[0];
   state.currentFrame = 0;
   state.undoStack  = [];
