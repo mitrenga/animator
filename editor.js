@@ -54,7 +54,7 @@ const spritesMapSelect = document.getElementById('spritesMapSelect');
 const REMOTE_BASE = 'https://willy2.shipard.pro:34444/endlessuniverse/';
 const SPRITES_MAP_URL = REMOTE_BASE + 'data/spritesMap.json';
 
-// Flat list of { category, file, sprite } built from spritesMap.json
+// Flat list of { scene, file, sprite } built from spritesMap.json
 let spritesMapEntries = [];
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
@@ -68,14 +68,18 @@ function timelines()  { return entity().timelines; }
 
 function currentAnim() { return anims()[state.currentAnim]; }
 
-function resolvedSprites(animName) {
-  const anim = anims()[animName];
-  if (!anim) return [];
-  if (anim.type === 'sprite') return anim.sprites;
-  if (anim.type === 'clone') {
-    const src = anims()[anim.source];
+function resolvedSprites(clipName, spriteKey) {
+  const ent = spriteKey
+    ? (state.data && state.data.sprites && state.data.sprites[spriteKey])
+    : entity();
+  if (!ent || !ent.clips) return [];
+  const clip = ent.clips[clipName];
+  if (!clip) return [];
+  if (clip.type === 'sprite') return clip.sprites;
+  if (clip.type === 'clone') {
+    const src = ent.clips[clip.source];
     if (!src || src.type !== 'sprite') return [];
-    if (anim.transform === 'horizontalMirror') {
+    if (clip.transform === 'horizontalMirror') {
       return src.sprites.map(sprite => sprite.map(row => row.split('').reverse().join('')));
     }
     return src.sprites;
@@ -482,11 +486,15 @@ function previewTick(ts) {
   if (state.previewStep >= timeline.length) state.previewStep = 0;
 
   const step    = timeline[state.previewStep];
-  const sprites = resolvedSprites(step.clip);
+  const sprites = resolvedSprites(step.clip, step.sprite);
 
   if (sprites.length) {
-    // Which frame to show?
-    const frameIdx = Math.floor(state.previewElapsed / frameDuration) % sprites.length;
+    let frameIdx;
+    if (typeof step.frame === 'number') {
+      frameIdx = Math.min(Math.max(step.frame, 0), sprites.length - 1);
+    } else {
+      frameIdx = Math.floor(state.previewElapsed / frameDuration) % sprites.length;
+    }
     renderPreviewFrame(sprites[frameIdx]);
     state.previewFrame = frameIdx;
   }
@@ -527,11 +535,60 @@ function saveCurrentTimeline() {
 function getTimeline() {
   const rows = [];
   document.querySelectorAll('#timelineBody tr').forEach(tr => {
-    const sel = tr.querySelector('select');
+    const sel = tr.querySelector('select:not(.frame-sel)');
+    const frameSel = tr.querySelector('select.frame-sel');
     const inp = tr.querySelector('input[type="number"]');
-    if (sel && inp) rows.push({ clip: sel.value, duration: parseInt(inp.value) || 70 });
+    if (!sel || !inp) return;
+    let parsed;
+    try { parsed = JSON.parse(sel.value); } catch (_) { parsed = null; }
+    if (!parsed || !parsed.clip) return;
+    const row = { duration: parseInt(inp.value) || 70, clip: parsed.clip };
+    if (parsed.sprite && parsed.sprite !== state.entityKey) row.sprite = parsed.sprite;
+    if (frameSel && frameSel.value !== '') {
+      const f = parseInt(frameSel.value, 10);
+      if (!Number.isNaN(f)) row.frame = f;
+    }
+    rows.push(row);
   });
   return rows;
+}
+
+function clipExists(spriteKey, clipName) {
+  const ent = state.data && state.data.sprites && state.data.sprites[spriteKey];
+  return !!(ent && ent.clips && ent.clips[clipName]);
+}
+
+function fillFrameSelect(sel, spriteKey, clipName, currentFrame) {
+  sel.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = ''; allOpt.textContent = '(all)';
+  sel.appendChild(allOpt);
+  const n = resolvedSprites(clipName, spriteKey).length;
+  for (let i = 0; i < n; i++) {
+    const opt = document.createElement('option');
+    opt.value = String(i); opt.textContent = String(i);
+    sel.appendChild(opt);
+  }
+  sel.value = (typeof currentFrame === 'number' && currentFrame >= 0 && currentFrame < n)
+    ? String(currentFrame) : '';
+}
+
+function fillClipSelect(sel) {
+  sel.innerHTML = '';
+  const sprites = (state.data && state.data.sprites) || {};
+  for (const sKey of Object.keys(sprites)) {
+    const ent = sprites[sKey];
+    if (!ent || !ent.clips) continue;
+    const grp = document.createElement('optgroup');
+    grp.label = sKey + (sKey === state.entityKey ? ' (current)' : '');
+    for (const clipName of Object.keys(ent.clips)) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ sprite: sKey, clip: clipName });
+      opt.textContent = clipName + (ent.clips[clipName].type === 'clone' ? ' (clone)' : '');
+      grp.appendChild(opt);
+    }
+    sel.appendChild(grp);
+  }
 }
 
 function buildTimelineSelect() {
@@ -547,8 +604,10 @@ function buildTimelineSelect() {
 }
 
 function loadCurrentTimeline() {
-  const available = new Set(Object.keys(anims()));
-  const steps = (timelines()[state.currentTimeline] || []).filter(s => available.has(s.clip));
+  const steps = (timelines()[state.currentTimeline] || []).filter(s => {
+    const sKey = s.sprite || state.entityKey;
+    return clipExists(sKey, s.clip);
+  });
   buildTimeline(steps);
 }
 
@@ -572,13 +631,19 @@ function addTimelineRow(step, i) {
 
   const tdA = document.createElement('td');
   const sel = document.createElement('select');
-  for (const name of Object.keys(anims())) {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    sel.appendChild(opt);
+  fillClipSelect(sel);
+  const stepSprite = step.sprite || state.entityKey;
+  const wantValue = JSON.stringify({ sprite: stepSprite, clip: step.clip });
+  if (Array.from(sel.options).some(o => o.value === wantValue)) {
+    sel.value = wantValue;
   }
-  sel.value = step.clip;
   tdA.appendChild(sel);
+
+  const tdF = document.createElement('td');
+  const frameSel = document.createElement('select');
+  frameSel.className = 'frame-sel';
+  fillFrameSelect(frameSel, stepSprite, step.clip, step.frame);
+  tdF.appendChild(frameSel);
 
   const tdD = document.createElement('td');
   const inp = document.createElement('input');
@@ -608,17 +673,25 @@ function addTimelineRow(step, i) {
     rebuildIndices();
     saveCurrentTimeline();
   });
-  sel.addEventListener('change', saveCurrentTimeline);
-  inp.addEventListener('change', saveCurrentTimeline);
+  sel.addEventListener('change', () => {
+    let parsed;
+    try { parsed = JSON.parse(sel.value); } catch (_) { parsed = null; }
+    if (parsed && parsed.clip) {
+      fillFrameSelect(frameSel, parsed.sprite, parsed.clip);
+    }
+    saveCurrentTimeline();
+  });
+  frameSel.addEventListener('change', saveCurrentTimeline);
+  inp.addEventListener('input', saveCurrentTimeline);
 
   tdX.append(btnUp, btnDn, btnDel);
-  tr.append(tdN, tdA, tdD, tdX);
+  tr.append(tdN, tdA, tdF, tdD, tdX);
   timelineBody.appendChild(tr);
 }
 
 document.getElementById('btnAddStep').addEventListener('click', () => {
-  const firstAnim = Object.keys(anims())[0];
-  addTimelineRow({ clip: firstAnim, duration: 70 });
+  const firstClip = Object.keys(anims())[0];
+  addTimelineRow({ clip: firstClip, duration: 70 });
   rebuildIndices();
   saveCurrentTimeline();
 });
@@ -762,6 +835,7 @@ document.getElementById('btnImportLoad').addEventListener('click', () => {
 const exportArea = document.getElementById('exportArea');
 
 document.getElementById('btnExport').addEventListener('click', () => {
+  saveCurrentTimeline();
   exportArea.value = JSON.stringify(state.data, null, 2);
   openDialog('dlgExport');
   exportArea.select();
@@ -811,6 +885,29 @@ function validate(data) {
           }
         });
       });
+    }
+    if (sprite.timelines) {
+      for (const [tlName, steps] of Object.entries(sprite.timelines)) {
+        if (!Array.isArray(steps)) continue;
+        steps.forEach((step, idx) => {
+          const refSprite = step.sprite || sKey;
+          const refEnt = data.sprites[refSprite];
+          const refClip = refEnt && refEnt.clips && refEnt.clips[step.clip];
+          if (!refClip) {
+            errors.push(`${sKey}/timelines/${tlName}[${idx}]: unknown clip '${refSprite}/${step.clip}'`);
+            return;
+          }
+          if (typeof step.frame === 'number') {
+            const len = (refClip.type === 'sprite' && refClip.sprites)
+              ? refClip.sprites.length
+              : (refClip.type === 'clone' && refEnt.clips[refClip.source] && refEnt.clips[refClip.source].sprites)
+                ? refEnt.clips[refClip.source].sprites.length : 0;
+            if (step.frame < 0 || step.frame >= len) {
+              errors.push(`${sKey}/timelines/${tlName}[${idx}]: frame ${step.frame} out of range (0..${len - 1})`);
+            }
+          }
+        });
+      }
     }
   }
   return errors;
@@ -905,7 +1002,7 @@ function buildSpritesMapSelect() {
   spritesMapEntries.forEach((e, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = `${e.category} / ${fileBaseName(e.file)} / ${e.sprite}`;
+    opt.textContent = `${e.scene} / ${fileBaseName(e.file)} / ${e.sprite}`;
     spritesMapSelect.appendChild(opt);
   });
 }
@@ -938,11 +1035,16 @@ fetch(SPRITES_MAP_URL + '?t=' + Date.now(), { cache: 'no-store' })
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
   .then(map => {
     spritesMapEntries = [];
-    Object.keys(map).forEach(category => {
-      (map[category] || []).forEach(entry => {
-        if (entry && entry.file && entry.sprite) {
-          spritesMapEntries.push({ category, file: entry.file, sprite: entry.sprite });
-        }
+    const scenes = (map && map.scenes) || {};
+    Object.keys(scenes).forEach(sceneName => {
+      const files = (scenes[sceneName] && scenes[sceneName].files) || [];
+      files.forEach(fileEntry => {
+        if (!fileEntry || !fileEntry.file || !Array.isArray(fileEntry.sprites)) return;
+        fileEntry.sprites.forEach(spriteKey => {
+          if (typeof spriteKey === 'string' && spriteKey) {
+            spritesMapEntries.push({ scene: sceneName, file: fileEntry.file, sprite: spriteKey });
+          }
+        });
       });
     });
     if (!spritesMapEntries.length) {

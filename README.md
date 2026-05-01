@@ -7,9 +7,9 @@ A browser-based sprite editor and animation timeline tool for designing pixel-ar
 Animator is a single-page web application for editing sprite-based animations stored in a simple JSON format. It provides:
 
 - **Sprite editor** — flood fill and pencil tools, undo/redo, horizontal pixel shifting, palette-driven colors with transparency support
-- **Multi-frame animations** — add/remove sprites within an animation, navigate between frames
-- **Clone animations** — derive an animation from another by transformation (e.g. horizontal mirror)
-- **Named timelines** — chain animations into sequences with per-step durations; create, switch, and delete multiple timelines per entity
+- **Multi-frame clips** — add/remove frames within a clip, navigate between them
+- **Clone clips** — derive a clip from another by transformation (e.g. horizontal mirror)
+- **Named timelines** — chain clips into sequences with per-step durations; create, switch, and delete multiple timelines per sprite
 - **Live preview** — animated playback of the active timeline with adjustable per-frame timing
 - **Import / export** — paste JSON, drop a file, or download the result
 
@@ -64,27 +64,37 @@ A minimal file looks like this:
   - **`clips`** — named animations:
     - **`type: "sprite"`** has an array `sprites`, each frame is an array of `height` strings of length `width`. Characters reference keys in the top-level `colors` map.
     - **`type: "clone"`** has `source` (another clip name within the same sprite) and `transform` (currently `"horizontalMirror"`). Clone clips are read-only in the editor.
-  - **`timelines`** — named playback sequences. Each entry is an array of `{ clip, duration }` steps. `duration` is the total time spent on that clip step, in ms; the editor cycles the clip's frames at the global frame interval until the duration is up.
+  - **`timelines`** — named playback sequences. Each entry is an array of `{ clip, duration }` steps. `duration` is the total time spent on that clip step, in ms; by default the editor cycles the clip's frames at the global frame interval until the duration is up. A step may include:
+    - **`sprite`** — reference a clip from another sprite definition in the same file (e.g. `{ "sprite": "matthewFalling", "clip": "right", "duration": 70 }`). When omitted, the clip is resolved against the sprite that owns the timeline.
+    - **`frame`** — pin the step to a single frame index instead of cycling all frames (e.g. `{ "clip": "right", "frame": 0, "duration": 200 }`). Frames are zero-based; out-of-range values are reported as warnings.
 
 ## Running
 
 The project is served as static files (one PHP entry point that includes no server-side logic). Drop the directory into any web server (Apache, nginx, `php -S`, etc.) and open `index.php`.
 
-On startup the editor fetches `data/spritesMap.json` (relative to the configured remote base URL) and uses it to populate the **sprite selector** in the header. The map lists which file and which sprite key to load, grouped by category:
+On startup the editor fetches `data/spritesMap.json` (relative to the configured remote base URL) and uses it to populate the **sprite selector** in the header. The map groups sprites by scene; each scene lists one or more files, and each file lists the sprite keys exposed for editing:
 
 ```json
 {
-  "moon": [
-    { "file": "data/moon01/global.json", "sprite": "matthewWalking" },
-    { "file": "data/moon01/global.json", "sprite": "matthewFalling" }
-  ],
-  "earth": [
-    { "file": "data/earth01/global.json", "sprite": "matthewJumping" }
-  ]
+  "scenes": {
+    "moon": {
+      "files": [
+        {
+          "file": "data/moon01/global.json",
+          "sprites": [
+            "matthewWalking",
+            "matthewFalling",
+            "matthewJumping",
+            "matthewFlipping"
+          ]
+        }
+      ]
+    }
+  }
 }
 ```
 
-Each entry shows in the dropdown as `category / file / sprite`. The first entry loads by default; switching the dropdown re-fetches the corresponding file and focuses on the chosen sprite key. If the map can't be loaded, the dropdown shows the failure reason and you can fall back to **Import JSON**.
+Every (scene, file, sprite) combination becomes a dropdown entry shown as `scene / file / sprite`. The first entry loads by default; switching the dropdown re-fetches the corresponding file and focuses on the chosen sprite key. If the map can't be loaded, the dropdown shows the failure reason and you can fall back to **Import JSON**.
 
 ## Editor controls
 
@@ -93,7 +103,7 @@ Each entry shows in the dropdown as `category / file / sprite`. The first entry 
 - **Undo / Redo** — Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y).
 - **Sprite selector** (header) — switch between sprites listed in `spritesMap.json`; selecting a different entry reloads its file.
 - **Animation / Sprite** — bottom bar selects which clip and which frame within it you are editing. `+ New sprite` duplicates the current frame.
-- **Timeline** — pick the active timeline from the dropdown, add new ones with `+`, delete with `✕`. Each row picks a clip and a duration; reorder with ↑ / ↓ and remove with ✕. Toggle **Loop** to repeat the timeline indefinitely.
+- **Timeline** — pick the active timeline from the dropdown, add new ones with `+`, delete with `✕`. Each row picks a clip, a frame, and a duration; the clip dropdown is grouped by sprite so you can reference clips from other sprite definitions in the same file. The frame dropdown defaults to **(all)** (cycle through every frame) but can be pinned to a specific frame index. Reorder rows with ↑ / ↓ and remove with ✕. Toggle **Loop** to repeat the timeline indefinitely.
 - **Preview** — adjust the per-frame interval (ms), then **Play** / **Pause**. The currently active timeline step is highlighted while playing.
 
 ## Persistence

@@ -81,7 +81,7 @@
         <div id="timeline-scroll">
           <table id="timelineTable">
             <thead>
-              <tr><th>#</th><th>Animation</th><th>Duration (ms)</th><th>Actions</th></tr>
+              <tr><th>#</th><th>Animation</th><th>Frame</th><th>Duration (ms)</th><th>Actions</th></tr>
             </thead>
             <tbody id="timelineBody"></tbody>
           </table>
