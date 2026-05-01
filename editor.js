@@ -987,7 +987,14 @@ function loadData(data, preferredEntityKey = null) {
   const sprites = resolvedSprites(state.currentAnim);
   if (sprites.length) renderPreviewFrame(sprites[0]);
 
+  syncSpritesMapSelect();
   startPreview();
+}
+
+function syncSpritesMapSelect() {
+  if (!spritesMapEntries.length) return;
+  const idx = spritesMapEntries.findIndex(e => e.sprite === state.entityKey);
+  if (idx >= 0) spritesMapSelect.value = String(idx);
 }
 
 // ─── Boot: load spritesMap.json, populate selector, load first ───────────────
@@ -1011,6 +1018,12 @@ function loadSpriteEntry(idx) {
   const e = spritesMapEntries[idx];
   if (!e) return;
   spritesMapSelect.value = String(idx);
+  // If the target sprite already exists in the loaded data, switch entity
+  // in place — preserves in-memory edits and imports without re-fetching.
+  if (state.data && state.data.sprites && state.data.sprites[e.sprite]) {
+    loadData(state.data, e.sprite);
+    return;
+  }
   fetch(REMOTE_BASE + e.file + '?t=' + Date.now(), { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(data => loadData(data, e.sprite))

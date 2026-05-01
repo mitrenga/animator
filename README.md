@@ -94,7 +94,7 @@ On startup the editor fetches `data/spritesMap.json` (relative to the configured
 }
 ```
 
-Every (scene, file, sprite) combination becomes a dropdown entry shown as `scene / file / sprite`. The first entry loads by default; switching the dropdown re-fetches the corresponding file and focuses on the chosen sprite key. If the map can't be loaded, the dropdown shows the failure reason and you can fall back to **Import JSON**.
+Every (scene, file, sprite) combination becomes a dropdown entry shown as `scene / file / sprite`. The first entry loads by default. Switching the dropdown reuses the in-memory data when the target sprite is already loaded (preserves edits and imports without re-fetching) and only re-fetches the file when the sprite isn't present. After **Import JSON**, the dropdown is synced to the imported entity. If the map can't be loaded, the dropdown shows the failure reason and you can fall back to **Import JSON**.
 
 ## Editor controls
 
