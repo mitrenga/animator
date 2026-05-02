@@ -4,6 +4,7 @@
 
 const state = {
   data: null,         // raw parsed JSON root object
+  currentFile: null,  // remote file path the data was last fetched from (null = imported)
   entityKey: null,    // e.g. "matt"
   currentAnim: null,  // animation name string
   currentFrame: 0,    // sprite index within animation
@@ -822,6 +823,7 @@ document.getElementById('btnImportLoad').addEventListener('click', () => {
   if (!text) return;
   try {
     const data = JSON.parse(text);
+    state.currentFile = null;
     loadData(data);
     closeDialog('dlgImport');
   } catch (err) {
@@ -1018,15 +1020,19 @@ function loadSpriteEntry(idx) {
   const e = spritesMapEntries[idx];
   if (!e) return;
   spritesMapSelect.value = String(idx);
-  // If the target sprite already exists in the loaded data, switch entity
-  // in place — preserves in-memory edits and imports without re-fetching.
-  if (state.data && state.data.sprites && state.data.sprites[e.sprite]) {
+  // Reuse in-memory data only when it came from the same file AND contains
+  // the target sprite. Otherwise re-fetch — different files may share a sprite
+  // key (e.g. "walking" in matthew.json and alien001.json).
+  if (state.currentFile === e.file && state.data && state.data.sprites && state.data.sprites[e.sprite]) {
     loadData(state.data, e.sprite);
     return;
   }
   fetch(REMOTE_BASE + e.file + '?t=' + Date.now(), { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(data => loadData(data, e.sprite))
+    .then(data => {
+      state.currentFile = e.file;
+      loadData(data, e.sprite);
+    })
     .catch(err => console.error('Failed to load sprite file', e.file, err));
 }
 
